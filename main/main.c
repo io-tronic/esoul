@@ -150,6 +150,8 @@ static esp_err_t init_camera(void)
 }
 #endif
 
+void camera_task(void *pvParameters);
+
 void app_main(void)
 {   
     esp_err_t ret;
@@ -219,7 +221,24 @@ void app_main(void)
     // Card has been initialized, print its properties
     sdmmc_card_print_info(stdout, card);
 
+    xTaskCreate(camera_task, "camera_task", 8192, NULL, 5, NULL);
+    
+
+    // // All done, unmount partition and disable SPI peripheral
+    // esp_vfs_fat_sdcard_unmount(mount_point, card);
+    // ESP_LOGI(TAG, "Card unmounted");
+
+    // //deinitialize the bus after all devices are removed
+    // spi_bus_free(host.slot);
+
+}
+
+
+void camera_task(void *pvParameters)
+{
     int img_num = 1;
+
+    esp_err_t ret;
 
     //look for images with name image_000.jpg, image_001.jpg, ... in order to determine what the current image_num is
     struct stat st;
@@ -244,6 +263,8 @@ void app_main(void)
             ESP_LOGI(TAG, "Failed to init camera. Exiting");
             return;
         }
+
+        vTaskDelay(1000 / portTICK_RATE_MS);
 
         ESP_LOGI(TAG, "Taking picture...");
         camera_fb_t *pic = esp_camera_fb_get();
@@ -272,12 +293,6 @@ void app_main(void)
 
         vTaskDelay(5000 / portTICK_RATE_MS);
     }
-
-    // All done, unmount partition and disable SPI peripheral
-    esp_vfs_fat_sdcard_unmount(mount_point, card);
-    ESP_LOGI(TAG, "Card unmounted");
-
-    //deinitialize the bus after all devices are removed
-    spi_bus_free(host.slot);
-
 }
+
+
