@@ -193,7 +193,9 @@ void app_main(void)
     };
     ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize bus.");
+        ESP_LOGE(TAG, "Failed to initialize bus, restarting");
+        vTaskDelay(5000 / portTICK_RATE_MS);
+        esp_restart();
         return;
     }
 
@@ -214,6 +216,8 @@ void app_main(void)
             ESP_LOGE(TAG, "Failed to initialize the card (%s). "
                      "Make sure SD card lines have pull-up resistors in place.", esp_err_to_name(ret));
         }
+        vTaskDelay(5000 / portTICK_RATE_MS);
+        esp_restart();
         return;
     }
     ESP_LOGI(TAG, "Filesystem mounted");
@@ -261,13 +265,25 @@ void camera_task(void *pvParameters)
     {   
         if(ESP_OK != init_camera()) {
             ESP_LOGI(TAG, "Failed to init camera. Exiting");
+            vTaskDelay(5000 / portTICK_RATE_MS);
+            esp_restart();
             return;
         }
 
-        vTaskDelay(1000 / portTICK_RATE_MS);
+        
 
-        ESP_LOGI(TAG, "Taking picture...");
+        ESP_LOGI(TAG, "Warming up camera...");
         camera_fb_t *pic = esp_camera_fb_get();
+        esp_camera_fb_return(pic);
+        pic = esp_camera_fb_get();
+        esp_camera_fb_return(pic);
+        pic = esp_camera_fb_get();
+        esp_camera_fb_return(pic);
+
+         ESP_LOGI(TAG, "Taking picture...");
+
+        pic = esp_camera_fb_get();
+        
 
         // use pic->buf to access the image
         ESP_LOGI(TAG, "Picture taken! Its size was: %zu bytes", pic->len);
@@ -281,6 +297,14 @@ void camera_task(void *pvParameters)
         ret = write_bin_file(image_file, pic->buf, pic->len);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to write file : %s", image_file);
+            if(ESP_OK != esp_camera_deinit()) {
+                ESP_LOGI(TAG, "Failed to deinit camera. Exiting");
+                vTaskDelay(5000 / portTICK_RATE_MS);
+                esp_restart();
+                return;
+            }
+            vTaskDelay(5000 / portTICK_RATE_MS);
+            esp_restart();
             return;
         }
 
@@ -288,6 +312,8 @@ void camera_task(void *pvParameters)
 
         if(ESP_OK != esp_camera_deinit()) {
             ESP_LOGI(TAG, "Failed to deinit camera. Exiting");
+            vTaskDelay(5000 / portTICK_RATE_MS);
+            esp_restart();
             return;
         }
 
