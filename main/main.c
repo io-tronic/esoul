@@ -43,14 +43,37 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_camera.h"
 
+
+/* From I2S Digital Microphone Recording Example */
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include <sys/unistd.h>
+#include <sys/stat.h>
+#include "sdkconfig.h"
+#include "esp_log.h"
+#include "esp_err.h"
+#include "esp_system.h"
+#include "esp_vfs_fat.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/i2s_pdm.h"
+#include "driver/gpio.h"
+#include "driver/spi_common.h"
+#include "sdmmc_cmd.h"
+#include "format_wav.h"
+
+
+static const char *TAG = "esoul-camera";
 
 // support IDF 5.x
 #ifndef portTICK_RATE_MS
 #define portTICK_RATE_MS portTICK_PERIOD_MS
 #endif
 
-#include "esp_camera.h"
+
 
 #define BOARD_XIAO_SENSE 1
 
@@ -75,7 +98,7 @@
 
 #define EXAMPLE_MAX_CHAR_SIZE    64
 
-static const char *TAG = "example";
+
 
 #define MOUNT_POINT "/sdcard"
 
@@ -85,6 +108,84 @@ static const char *TAG = "example";
 #define PIN_NUM_MOSI  CONFIG_EXAMPLE_PIN_MOSI
 #define PIN_NUM_CLK   CONFIG_EXAMPLE_PIN_CLK
 #define PIN_NUM_CS    CONFIG_EXAMPLE_PIN_CS
+
+#define NUM_CHANNELS        (1) // For mono recording only!
+#define SAMPLE_SIZE         (CONFIG_EXAMPLE_BIT_SAMPLE * 1024)
+#define BYTE_RATE           (CONFIG_EXAMPLE_SAMPLE_RATE * (CONFIG_EXAMPLE_BIT_SAMPLE / 8)) * NUM_CHANNELS
+
+i2s_chan_handle_t rx_handle = NULL;
+
+static int16_t i2s_readraw_buff[SAMPLE_SIZE];
+size_t bytes_read;
+const int WAVE_HEADER_SIZE = 44;
+
+
+void init_microphone(void)
+{
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &rx_handle));
+
+    i2s_pdm_rx_config_t pdm_rx_cfg = {
+        .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG(CONFIG_EXAMPLE_SAMPLE_RATE),
+        /* The default mono slot is the left slot (whose 'select pin' of the PDM microphone is pulled down) */
+        .slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {
+            .clk = CONFIG_EXAMPLE_I2S_CLK_GPIO,
+            .din = CONFIG_EXAMPLE_I2S_DATA_GPIO,
+            .invert_flags = {
+                .clk_inv = false,
+            },
+        },
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_pdm_rx_mode(rx_handle, &pdm_rx_cfg));
+    ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
+}
+
+void record_wav(uint32_t rec_time)
+{
+    // Use POSIX and C standard library functions to work with files.
+    int flash_wr_size = 0;
+    ESP_LOGI(TAG, "Opening file");
+
+    uint32_t flash_rec_time = BYTE_RATE * rec_time;
+    const wav_header_t wav_header =
+        WAV_HEADER_PCM_DEFAULT(flash_rec_time, 16, CONFIG_EXAMPLE_SAMPLE_RATE, 1);
+
+    // First check if file exists before creating a new file.
+    struct stat st;
+    if (stat(MOUNT_POINT"/record.wav", &st) == 0) {
+        // Delete it if it exists
+        unlink(MOUNT_POINT"/record.wav");
+    }
+
+    // Create new WAV file
+    FILE *f = fopen(MOUNT_POINT"/record.wav", "a");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open file for writing");
+        return;
+    }
+
+    // Write the header to the WAV file
+    fwrite(&wav_header, sizeof(wav_header), 1, f);
+
+    // Start recording
+    while (flash_wr_size < flash_rec_time) {
+        // Read the RAW samples from the microphone
+        if (i2s_channel_read(rx_handle, (char *)i2s_readraw_buff, SAMPLE_SIZE, &bytes_read, 1000) == ESP_OK) {
+            printf("[0] %d [1] %d [2] %d [3]%d ...\n", i2s_readraw_buff[0], i2s_readraw_buff[1], i2s_readraw_buff[2], i2s_readraw_buff[3]);
+            // Write the samples to the WAV file
+            fwrite(i2s_readraw_buff, bytes_read, 1, f);
+            flash_wr_size += bytes_read;
+        } else {
+            printf("Read Failed!\n");
+        }
+    }
+
+    ESP_LOGI(TAG, "Recording done!");
+    fclose(f);
+    ESP_LOGI(TAG, "File written on SDCard");
+}
+
 
 static esp_err_t write_bin_file(const char *path, uint8_t *data_ptr, size_t data_len)
 {
@@ -151,6 +252,7 @@ static esp_err_t init_camera(void)
 #endif
 
 void camera_task(void *pvParameters);
+void mic_task(void *pvParameters);
 
 void app_main(void)
 {   
@@ -224,6 +326,10 @@ void app_main(void)
 
     // Card has been initialized, print its properties
     sdmmc_card_print_info(stdout, card);
+
+    init_microphone();
+
+    xTaskCreate(mic_task, "mic_task", 4096, NULL, 5, NULL);
 
     xTaskCreate(camera_task, "camera_task", 8192, NULL, 5, NULL);
     
@@ -321,4 +427,34 @@ void camera_task(void *pvParameters)
     }
 }
 
+
+void mic_task(void *pvParameters)
+{
+    int audiofile_num = 1;
+
+    esp_err_t ret;
+
+    //look for audio files with name A0000000.jpg, A0000001.jpg, ... in order to determine what the current image_num is
+    struct stat st;
+    const char test_audio_file[EXAMPLE_MAX_CHAR_SIZE];
+    while (1)
+    {
+        snprintf(test_audio_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/A%07d.jpg", audiofile_num);
+        
+        ESP_LOGI(TAG, "Checking file %s", test_audio_file);
+        if (stat(test_audio_file, &st) != 0)
+        {
+            break;
+        }
+        audiofile_num++;
+    }
+
+    ESP_LOGI(TAG, "found %d images", audiofile_num);
+
+
+    while (1)
+    {
+        record_wav(10);
+    }
+}
 
