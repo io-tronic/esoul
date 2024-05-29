@@ -249,7 +249,7 @@ void camera_task(void *pvParameters)
     const char test_image_file[EXAMPLE_MAX_CHAR_SIZE];
     while (1)
     {
-        snprintf(test_image_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/IMAGE%03d.jpg", img_num);
+        snprintf(test_image_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/I%07d.jpg", img_num);
         
         ESP_LOGI(TAG, "Checking file %s", test_image_file);
         if (stat(test_image_file, &st) != 0)
@@ -291,7 +291,7 @@ void camera_task(void *pvParameters)
         
         // image file name should be unique based on img_num. image_000.jpg, image_001.jpg, ...
         const char image_file[EXAMPLE_MAX_CHAR_SIZE];
-        snprintf(image_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/IMAGE%03d.jpg", img_num++);
+        snprintf(image_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/I%07d.jpg", img_num++);
 
         // const char* temp = image_file;
         ret = write_bin_file(image_file, pic->buf, pic->len);
