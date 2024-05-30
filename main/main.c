@@ -65,6 +65,9 @@
 #include "sdmmc_cmd.h"
 #include "format_wav.h"
 
+#include <stdlib.h>
+
+
 
 static const char *TAG = "esoul-camera";
 
@@ -204,7 +207,6 @@ static esp_err_t write_bin_file(const char *path, uint8_t *data_ptr, size_t data
 
 
 
-#if ESP_CAMERA_SUPPORTED
 static camera_config_t camera_config = {
     .pin_pwdn = CAM_PIN_PWDN,
     .pin_reset = CAM_PIN_RESET,
@@ -249,7 +251,28 @@ static esp_err_t init_camera(void)
 
     return ESP_OK;
 }
-#endif
+
+
+char sessionfolder[32];
+
+void createFolderIfNotExists(const char *baseFolder, const char *folderPrefix) {
+    int folderNumber = 1;
+    sessionfolder[0] = '\0';
+    while (1) {
+        sprintf(sessionfolder, "%s/%s%d", baseFolder, folderPrefix, folderNumber);
+        if (access(sessionfolder, F_OK) == -1) {
+            printf("Creating folder: %s\n", sessionfolder);
+            if (mkdir(sessionfolder, 0777) == -1) {
+                printf("Failed to create folder: %s\n", sessionfolder);
+                return;
+            }
+            return;
+        }
+        folderNumber++;
+    }
+}
+
+
 
 void camera_task(void *pvParameters);
 void mic_task(void *pvParameters);
@@ -329,6 +352,10 @@ void app_main(void)
 
     init_microphone();
 
+    createFolderIfNotExists(MOUNT_POINT, "F");
+
+    // ESP_LOGI(TAG, "created folder %s", sessionfolder);
+
     xTaskCreate(mic_task, "mic_task", 4096, NULL, 5, NULL);
 
     xTaskCreate(camera_task, "camera_task", 8192, NULL, 5, NULL);
@@ -355,7 +382,7 @@ void camera_task(void *pvParameters)
     const char test_image_file[EXAMPLE_MAX_CHAR_SIZE];
     while (1)
     {
-        snprintf(test_image_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/I%07d.jpg", img_num);
+        snprintf(test_image_file, EXAMPLE_MAX_CHAR_SIZE, "%s/I%07d.jpg", sessionfolder, img_num);
         
         ESP_LOGI(TAG, "Checking file %s", test_image_file);
         if (stat(test_image_file, &st) != 0)
@@ -397,7 +424,7 @@ void camera_task(void *pvParameters)
         
         // image file name should be unique based on img_num. image_000.jpg, image_001.jpg, ...
         const char image_file[EXAMPLE_MAX_CHAR_SIZE];
-        snprintf(image_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/I%07d.jpg", img_num++);
+        snprintf(image_file, EXAMPLE_MAX_CHAR_SIZE, "%s/I%07d.jpg", sessionfolder, img_num++);
 
         // const char* temp = image_file;
         ret = write_bin_file(image_file, pic->buf, pic->len);
@@ -439,7 +466,7 @@ void mic_task(void *pvParameters)
     const char test_audio_file[EXAMPLE_MAX_CHAR_SIZE];
     while (1)
     {
-        snprintf(test_audio_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/A%07d.wav", audiofile_num);
+        snprintf(test_audio_file, EXAMPLE_MAX_CHAR_SIZE, "%s/A%07d.wav", sessionfolder, audiofile_num);
         
         ESP_LOGI(TAG, "Checking file %s", test_audio_file);
         if (stat(test_audio_file, &st) != 0)
@@ -455,7 +482,7 @@ void mic_task(void *pvParameters)
     while (1)
     {
         const char audio_file[EXAMPLE_MAX_CHAR_SIZE];
-        snprintf(audio_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/A%07d.wav", audiofile_num++);
+        snprintf(audio_file, EXAMPLE_MAX_CHAR_SIZE, "%s/A%07d.wav", sessionfolder, audiofile_num++);
         record_wav(20, audio_file);
     }
 }
