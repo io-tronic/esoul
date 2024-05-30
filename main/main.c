@@ -141,7 +141,7 @@ void init_microphone(void)
     ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
 }
 
-void record_wav(uint32_t rec_time)
+void record_wav(uint32_t rec_time, const char *path)
 {
     // Use POSIX and C standard library functions to work with files.
     int flash_wr_size = 0;
@@ -153,13 +153,13 @@ void record_wav(uint32_t rec_time)
 
     // First check if file exists before creating a new file.
     struct stat st;
-    if (stat(MOUNT_POINT"/record.wav", &st) == 0) {
+    if (stat(path, &st) == 0) {
         // Delete it if it exists
-        unlink(MOUNT_POINT"/record.wav");
+        unlink(path);
     }
 
     // Create new WAV file
-    FILE *f = fopen(MOUNT_POINT"/record.wav", "a");
+    FILE *f = fopen(path, "a");
     if (f == NULL) {
         ESP_LOGE(TAG, "Failed to open file for writing");
         return;
@@ -439,7 +439,7 @@ void mic_task(void *pvParameters)
     const char test_audio_file[EXAMPLE_MAX_CHAR_SIZE];
     while (1)
     {
-        snprintf(test_audio_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/A%07d.jpg", audiofile_num);
+        snprintf(test_audio_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/A%07d.wav", audiofile_num);
         
         ESP_LOGI(TAG, "Checking file %s", test_audio_file);
         if (stat(test_audio_file, &st) != 0)
@@ -454,7 +454,9 @@ void mic_task(void *pvParameters)
 
     while (1)
     {
-        record_wav(10);
+        const char audio_file[EXAMPLE_MAX_CHAR_SIZE];
+        snprintf(audio_file, EXAMPLE_MAX_CHAR_SIZE, MOUNT_POINT"/A%07d.wav", audiofile_num++);
+        record_wav(20, audio_file);
     }
 }
 
