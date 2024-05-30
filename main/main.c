@@ -1,25 +1,11 @@
 /**
- * This example takes a picture every 5s and print its size on serial monitor.
+ * This program records audio and pictures to an sd card at intervals set in Kconfig.
  */
 
 // =============================== SETUP ======================================
 
-// 1. Board setup (Uncomment):
-// #define BOARD_WROVER_KIT
-// #define BOARD_ESP32CAM_AITHINKER
-
 /**
- * 2. Kconfig setup
- *
- * If you have a Kconfig file, copy the content from
- *  https://github.com/espressif/esp32-camera/blob/master/Kconfig into it.
- * In case you haven't, copy and paste this Kconfig file inside the src directory.
- * This Kconfig file has definitions that allows more control over the camera and
- * how it will be initialized.
- */
-
-/**
- * 3. Enable PSRAM on sdkconfig:
+ * Enable PSRAM on sdkconfig:
  *
  * CONFIG_ESP32_SPIRAM_SUPPORT=y
  *
@@ -100,7 +86,7 @@ static const char *TAG = "esoul";
 #define CAM_PIN_PCLK 13
 
 
-#define EXAMPLE_MAX_CHAR_SIZE    64
+#define ESOUL_MAX_CHAR_SIZE    64
 
 
 
@@ -108,14 +94,14 @@ static const char *TAG = "esoul";
 
 // Pin assignments can be set in menuconfig, see "SD SPI Example Configuration" menu.
 // You can also change the pin assignments here by changing the following 4 lines.
-#define PIN_NUM_MISO  CONFIG_EXAMPLE_PIN_MISO
-#define PIN_NUM_MOSI  CONFIG_EXAMPLE_PIN_MOSI
-#define PIN_NUM_CLK   CONFIG_EXAMPLE_PIN_CLK
-#define PIN_NUM_CS    CONFIG_EXAMPLE_PIN_CS
+#define PIN_NUM_MISO  CONFIG_ESOUL_PIN_MISO
+#define PIN_NUM_MOSI  CONFIG_ESOUL_PIN_MOSI
+#define PIN_NUM_CLK   CONFIG_ESOUL_PIN_CLK
+#define PIN_NUM_CS    CONFIG_ESOUL_PIN_CS
 
 #define NUM_CHANNELS        (1) // For mono recording only!
-#define SAMPLE_SIZE         (CONFIG_EXAMPLE_BIT_SAMPLE * 1024)
-#define BYTE_RATE           (CONFIG_EXAMPLE_SAMPLE_RATE * (CONFIG_EXAMPLE_BIT_SAMPLE / 8)) * NUM_CHANNELS
+#define SAMPLE_SIZE         (CONFIG_ESOUL_BIT_SAMPLE * 1024)
+#define BYTE_RATE           (CONFIG_ESOUL_SAMPLE_RATE * (CONFIG_ESOUL_BIT_SAMPLE / 8)) * NUM_CHANNELS
 
 i2s_chan_handle_t rx_handle = NULL;
 
@@ -130,12 +116,12 @@ void init_microphone(void)
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &rx_handle));
 
     i2s_pdm_rx_config_t pdm_rx_cfg = {
-        .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG(CONFIG_EXAMPLE_SAMPLE_RATE),
+        .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG(CONFIG_ESOUL_SAMPLE_RATE),
         /* The default mono slot is the left slot (whose 'select pin' of the PDM microphone is pulled down) */
         .slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
-            .clk = CONFIG_EXAMPLE_I2S_CLK_GPIO,
-            .din = CONFIG_EXAMPLE_I2S_DATA_GPIO,
+            .clk = CONFIG_ESOUL_I2S_CLK_GPIO,
+            .din = CONFIG_ESOUL_I2S_DATA_GPIO,
             .invert_flags = {
                 .clk_inv = false,
             },
@@ -154,7 +140,7 @@ void record_wav(uint32_t rec_time, const char *path)
 
     uint32_t flash_rec_time = BYTE_RATE * rec_time;
     const wav_header_t wav_header =
-        WAV_HEADER_PCM_DEFAULT(flash_rec_time, 16, CONFIG_EXAMPLE_SAMPLE_RATE, 1);
+        WAV_HEADER_PCM_DEFAULT(flash_rec_time, 16, CONFIG_ESOUL_SAMPLE_RATE, 1);
 
     // First check if file exists before creating a new file.
     struct stat st;
@@ -264,11 +250,11 @@ static esp_err_t init_sdcard(void)
     // If format_if_mount_failed is set to true, SD card will be partitioned and
     // formatted in case when mounting fails.
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
-#ifdef CONFIG_EXAMPLE_FORMAT_IF_MOUNT_FAILED
+#ifdef CONFIG_ESOUL_FORMAT_IF_MOUNT_FAILED
         .format_if_mount_failed = true,
 #else
         .format_if_mount_failed = false,
-#endif // EXAMPLE_FORMAT_IF_MOUNT_FAILED
+#endif // ESOUL_FORMAT_IF_MOUNT_FAILED
         .max_files = 5,
         .allocation_unit_size = 16 * 1024
     };
@@ -309,7 +295,7 @@ static esp_err_t init_sdcard(void)
     if (ret != ESP_OK) {
         if (ret == ESP_FAIL) {
             ESP_LOGE(TAG, "Failed to mount filesystem. "
-                     "If you want the card to be formatted, set the CONFIG_EXAMPLE_FORMAT_IF_MOUNT_FAILED menuconfig option.");
+                     "If you want the card to be formatted, set the CONFIG_ESOUL_FORMAT_IF_MOUNT_FAILED menuconfig option.");
         } else {
             ESP_LOGE(TAG, "Failed to initialize the card (%s). "
                      "Make sure SD card lines have pull-up resistors in place.", esp_err_to_name(ret));
@@ -405,8 +391,8 @@ void camera_task(void *pvParameters)
 
         
         // image file name should be unique based on img_num. image_000.jpg, image_001.jpg, ...
-        char image_file[EXAMPLE_MAX_CHAR_SIZE];
-        snprintf(image_file, EXAMPLE_MAX_CHAR_SIZE, "%s/I%07d.jpg", sessionfolder, img_num++);
+        char image_file[ESOUL_MAX_CHAR_SIZE];
+        snprintf(image_file, ESOUL_MAX_CHAR_SIZE, "%s/I%07d.jpg", sessionfolder, img_num++);
 
         // const char* temp = image_file;
         ret = write_bin_file(image_file, pic->buf, pic->len);
@@ -429,7 +415,7 @@ void camera_task(void *pvParameters)
             return;
         }
 
-        vTaskDelay(5000 / portTICK_RATE_MS);
+        vTaskDelay((CONFIG_ESOUL_CAMERA_REC_TIME * 1000) / portTICK_RATE_MS);
     }
 }
 
@@ -441,9 +427,9 @@ void mic_task(void *pvParameters)
 
     while (1)
     {
-        char audio_file[EXAMPLE_MAX_CHAR_SIZE];
-        snprintf(audio_file, EXAMPLE_MAX_CHAR_SIZE, "%s/A%07d.wav", sessionfolder, audiofile_num++);
-        record_wav(20, audio_file);
+        char audio_file[ESOUL_MAX_CHAR_SIZE];
+        snprintf(audio_file, ESOUL_MAX_CHAR_SIZE, "%s/A%07d.wav", sessionfolder, audiofile_num++);
+        record_wav(CONFIG_ESOUL_AUDIO_REC_TIME, audio_file);
     }
 }
 
