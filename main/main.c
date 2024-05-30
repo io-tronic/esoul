@@ -70,7 +70,7 @@
 
 
 
-static const char *TAG = "esoul-camera";
+static const char *TAG = "esoul";
 
 // support IDF 5.x
 #ifndef portTICK_RATE_MS
@@ -147,6 +147,7 @@ void init_microphone(void)
 
 void record_wav(uint32_t rec_time, const char *path)
 {
+    const char* TAG = "esoul_record_wav";
     // Use POSIX and C standard library functions to work with files.
     int flash_wr_size = 0;
     ESP_LOGI(TAG, "Opening file");
@@ -176,7 +177,7 @@ void record_wav(uint32_t rec_time, const char *path)
     while (flash_wr_size < flash_rec_time) {
         // Read the RAW samples from the microphone
         if (i2s_channel_read(rx_handle, (char *)i2s_readraw_buff, SAMPLE_SIZE, &bytes_read, 1000) == ESP_OK) {
-            printf("[0] %d [1] %d [2] %d [3]%d ...\n", i2s_readraw_buff[0], i2s_readraw_buff[1], i2s_readraw_buff[2], i2s_readraw_buff[3]);
+            // printf("[0] %d [1] %d [2] %d [3]%d ...\n", i2s_readraw_buff[0], i2s_readraw_buff[1], i2s_readraw_buff[2], i2s_readraw_buff[3]);
             // Write the samples to the WAV file
             fwrite(i2s_readraw_buff, bytes_read, 1, f);
             flash_wr_size += bytes_read;
@@ -336,9 +337,9 @@ void createFolderIfNotExists(const char *baseFolder, const char *folderPrefix) {
     while (1) {
         sprintf(sessionfolder, "%s/%s%d", baseFolder, folderPrefix, folderNumber);
         if (access(sessionfolder, F_OK) == -1) {
-            printf("Creating folder: %s\n", sessionfolder);
+            ESP_LOGI(TAG, "Creating folder: %s\n", sessionfolder);
             if (mkdir(sessionfolder, 0777) == -1) {
-                printf("Failed to create folder: %s\n", sessionfolder);
+                ESP_LOGE(TAG, "Failed to create folder: %s\n", sessionfolder);
                 return;
             }
             return;
@@ -366,37 +367,15 @@ void app_main(void)
     xTaskCreate(camera_task, "camera_task", 8192, NULL, 5, NULL);
     
 
-    // // All done, unmount partition and disable SPI peripheral
-    // esp_vfs_fat_sdcard_unmount(mount_point, card);
-    // ESP_LOGI(TAG, "Card unmounted");
-
-    // //deinitialize the bus after all devices are removed
-
 }
 
 
 void camera_task(void *pvParameters)
 {
+    const char* TAG = "esoul_camera_task";
     int img_num = 1;
 
     esp_err_t ret;
-
-    //look for images with name image_000.jpg, image_001.jpg, ... in order to determine what the current image_num is
-    struct stat st;
-    const char test_image_file[EXAMPLE_MAX_CHAR_SIZE];
-    while (1)
-    {
-        snprintf(test_image_file, EXAMPLE_MAX_CHAR_SIZE, "%s/I%07d.jpg", sessionfolder, img_num);
-        
-        ESP_LOGI(TAG, "Checking file %s", test_image_file);
-        if (stat(test_image_file, &st) != 0)
-        {
-            break;
-        }
-        img_num++;
-    }
-
-    ESP_LOGI(TAG, "found %d images", img_num);
 
     while (1)
     {   
@@ -426,7 +405,7 @@ void camera_task(void *pvParameters)
 
         
         // image file name should be unique based on img_num. image_000.jpg, image_001.jpg, ...
-        const char image_file[EXAMPLE_MAX_CHAR_SIZE];
+        char image_file[EXAMPLE_MAX_CHAR_SIZE];
         snprintf(image_file, EXAMPLE_MAX_CHAR_SIZE, "%s/I%07d.jpg", sessionfolder, img_num++);
 
         // const char* temp = image_file;
@@ -457,30 +436,12 @@ void camera_task(void *pvParameters)
 
 void mic_task(void *pvParameters)
 {
+    const char* TAG = "esoul_mic_task";
     int audiofile_num = 1;
 
-
-    //look for audio files with name A0000000.jpg, A0000001.jpg, ... in order to determine what the current image_num is
-    struct stat st;
-    const char test_audio_file[EXAMPLE_MAX_CHAR_SIZE];
     while (1)
     {
-        snprintf(test_audio_file, EXAMPLE_MAX_CHAR_SIZE, "%s/A%07d.wav", sessionfolder, audiofile_num);
-        
-        ESP_LOGI(TAG, "Checking file %s", test_audio_file);
-        if (stat(test_audio_file, &st) != 0)
-        {
-            break;
-        }
-        audiofile_num++;
-    }
-
-    ESP_LOGI(TAG, "found %d images", audiofile_num);
-
-
-    while (1)
-    {
-        const char audio_file[EXAMPLE_MAX_CHAR_SIZE];
+        char audio_file[EXAMPLE_MAX_CHAR_SIZE];
         snprintf(audio_file, EXAMPLE_MAX_CHAR_SIZE, "%s/A%07d.wav", sessionfolder, audiofile_num++);
         record_wav(20, audio_file);
     }
