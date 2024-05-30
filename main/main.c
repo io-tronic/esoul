@@ -45,6 +45,8 @@
 #include "freertos/task.h"
 #include "esp_camera.h"
 
+#include "esp_sleep.h"
+#include <stdlib.h>
 
 /* From I2S Digital Microphone Recording Example */
 #include <stdio.h>
@@ -65,7 +67,6 @@
 #include "sdmmc_cmd.h"
 #include "format_wav.h"
 
-#include <stdlib.h>
 
 
 
@@ -253,33 +254,10 @@ static esp_err_t init_camera(void)
 }
 
 
-char sessionfolder[32];
-
-void createFolderIfNotExists(const char *baseFolder, const char *folderPrefix) {
-    int folderNumber = 1;
-    sessionfolder[0] = '\0';
-    while (1) {
-        sprintf(sessionfolder, "%s/%s%d", baseFolder, folderPrefix, folderNumber);
-        if (access(sessionfolder, F_OK) == -1) {
-            printf("Creating folder: %s\n", sessionfolder);
-            if (mkdir(sessionfolder, 0777) == -1) {
-                printf("Failed to create folder: %s\n", sessionfolder);
-                return;
-            }
-            return;
-        }
-        folderNumber++;
-    }
-}
-
-
-
-void camera_task(void *pvParameters);
-void mic_task(void *pvParameters);
-
-void app_main(void)
-{   
-    esp_err_t ret;
+/*attempts to intialize the sd card*/
+static esp_err_t init_sdcard(void)
+{
+        esp_err_t ret;
 
     // Options for mounting the filesystem.
     // If format_if_mount_failed is set to true, SD card will be partitioned and
@@ -316,13 +294,7 @@ void app_main(void)
         .quadhd_io_num = -1,
         .max_transfer_sz = 4000,
     };
-    ret = spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize bus, restarting");
-        vTaskDelay(5000 / portTICK_RATE_MS);
-        esp_restart();
-        return;
-    }
+    ESP_ERROR_CHECK(spi_bus_initialize(host.slot, &bus_cfg, SDSPI_DEFAULT_DMA));
 
     // This initializes the slot without card detect (CD) and write protect (WP) signals.
     // Modify slot_config.gpio_cd and slot_config.gpio_wp if your board has these signals.
@@ -341,20 +313,53 @@ void app_main(void)
             ESP_LOGE(TAG, "Failed to initialize the card (%s). "
                      "Make sure SD card lines have pull-up resistors in place.", esp_err_to_name(ret));
         }
-        vTaskDelay(5000 / portTICK_RATE_MS);
-        esp_restart();
-        return;
+        spi_bus_free(host.slot);
+        esp_sleep_enable_timer_wakeup(5 * 1000000);
+        esp_deep_sleep_start();
+        abort();
+        return ESP_FAIL;
     }
     ESP_LOGI(TAG, "Filesystem mounted");
 
     // Card has been initialized, print its properties
     sdmmc_card_print_info(stdout, card);
 
+    return ESP_OK;
+}
+
+
+char sessionfolder[32];
+
+void createFolderIfNotExists(const char *baseFolder, const char *folderPrefix) {
+    int folderNumber = 1;
+    sessionfolder[0] = '\0';
+    while (1) {
+        sprintf(sessionfolder, "%s/%s%d", baseFolder, folderPrefix, folderNumber);
+        if (access(sessionfolder, F_OK) == -1) {
+            printf("Creating folder: %s\n", sessionfolder);
+            if (mkdir(sessionfolder, 0777) == -1) {
+                printf("Failed to create folder: %s\n", sessionfolder);
+                return;
+            }
+            return;
+        }
+        folderNumber++;
+    }
+}
+
+
+
+void camera_task(void *pvParameters);
+void mic_task(void *pvParameters);
+
+void app_main(void)
+{   
+
+    init_sdcard();
     init_microphone();
 
     createFolderIfNotExists(MOUNT_POINT, "F");
 
-    // ESP_LOGI(TAG, "created folder %s", sessionfolder);
 
     xTaskCreate(mic_task, "mic_task", 4096, NULL, 5, NULL);
 
@@ -366,7 +371,6 @@ void app_main(void)
     // ESP_LOGI(TAG, "Card unmounted");
 
     // //deinitialize the bus after all devices are removed
-    // spi_bus_free(host.slot);
 
 }
 
@@ -398,8 +402,7 @@ void camera_task(void *pvParameters)
     {   
         if(ESP_OK != init_camera()) {
             ESP_LOGI(TAG, "Failed to init camera. Exiting");
-            vTaskDelay(5000 / portTICK_RATE_MS);
-            esp_restart();
+            abort();
             return;
         }
 
@@ -413,7 +416,7 @@ void camera_task(void *pvParameters)
         pic = esp_camera_fb_get();
         esp_camera_fb_return(pic);
 
-         ESP_LOGI(TAG, "Taking picture...");
+        ESP_LOGI(TAG, "Taking picture...");
 
         pic = esp_camera_fb_get();
         
@@ -431,13 +434,11 @@ void camera_task(void *pvParameters)
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to write file : %s", image_file);
             if(ESP_OK != esp_camera_deinit()) {
-                ESP_LOGI(TAG, "Failed to deinit camera. Exiting");
-                vTaskDelay(5000 / portTICK_RATE_MS);
-                esp_restart();
-                return;
+                ESP_LOGI(TAG, "Failed to deinit camera. Trying again");
+                vTaskDelay(1000 / portTICK_RATE_MS);
+                esp_camera_deinit();
             }
-            vTaskDelay(5000 / portTICK_RATE_MS);
-            esp_restart();
+            abort();
             return;
         }
 
@@ -445,8 +446,7 @@ void camera_task(void *pvParameters)
 
         if(ESP_OK != esp_camera_deinit()) {
             ESP_LOGI(TAG, "Failed to deinit camera. Exiting");
-            vTaskDelay(5000 / portTICK_RATE_MS);
-            esp_restart();
+            abort();
             return;
         }
 
@@ -459,7 +459,6 @@ void mic_task(void *pvParameters)
 {
     int audiofile_num = 1;
 
-    esp_err_t ret;
 
     //look for audio files with name A0000000.jpg, A0000001.jpg, ... in order to determine what the current image_num is
     struct stat st;
